@@ -1,0 +1,26 @@
+{
+    "cluster": "ecs-linear-blog:ClusterName",
+    "serviceName": "ecs-linear-blog:ServiceName",
+    "taskDefinition": "ecstest4:TaskDefinitionArn",
+    "loadBalancers": [
+        {
+            "targetGroupArn": "ecstest4:TargetGroup1Arn",
+            "containerName": "ecs-linear-blog:ServiceName",
+            "containerPort": 80
+        }
+    ],
+    "launchType": "FARGATE",
+    "schedulingStrategy": "REPLICA",
+    "deploymentController": {
+        "type": "CODE_DEPLOY"
+    },
+    "platformVersion": "LATEST",
+    "networkConfiguration": {
+       "awsvpcConfiguration": {
+          "assignPublicIp": "ENABLED",
+          "securityGroups": [ "ecs-linear-blog:PublicLoadBalancerSecurityGroup" ],
+          "subnets": [ "ecs-linear-blog:PrivateSubnetOne", "ecs-linear-blog:PrivateSubnetOne" ]
+       }
+    },
+    "desiredCount": 2
+}
