@@ -1,7 +1,7 @@
 {
 	"applicationName": "ecs-linear-blog:ApplicationName",
 	"deploymentGroupName": "ecs-linear-blog:DeploymentGroupName",
-	"deploymentConfigName": "CodeDeployDefault.ECSLinear10PercentEvery1Minute",
+	"deploymentConfigName": "CodeDeployDefault.ECSLinear10PercentEvery1Minutes",
 	"serviceRoleArn": "ecs-linear-blog:EcsRoleForCodeDeploy",
 
 	"deploymentStyle": {
