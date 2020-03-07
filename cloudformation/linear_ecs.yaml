@@ -1,0 +1,599 @@
+Description:
+  This template deploys a VPC, with a pair of public and private subnets spread
+  across two Availability Zones. It deploys an Internet Gateway, with a default
+  route on the public subnets. 
+
+Parameters:
+  VpcCIDR:
+    Description: Please enter the IP range (CIDR notation) for this VPC
+    Type: String
+    Default: 10.192.0.0/16
+
+  PublicSubnetOneCIDR:
+    Description: Please enter the IP range (CIDR notation) for the public subnet in the first Availability Zone
+    Type: String
+    Default: 10.192.10.0/24
+
+  PublicSubnetTwoCIDR:
+    Description: Please enter the IP range (CIDR notation) for the public subnet in the second Availability Zone
+    Type: String
+    Default: 10.192.11.0/24
+
+  PrivateSubnetOneCIDR:
+    Description: Please enter the IP range (CIDR notation) for the private subnet in the first Availability Zone
+    Type: String
+    Default: 10.192.20.0/24
+
+  PrivateSubnetTwoCIDR:
+    Description: Please enter the IP range (CIDR notation) for the private subnet in the second Availability Zone
+    Type: String
+    Default: 10.192.21.0/24
+  
+  Tag:
+    Type: String
+    Default: latest
+
+  ImageUrl:
+    Type: String
+    Default: nginx
+    Description: Docker image URL
+
+  ContainerPort:
+    Type: Number
+    Default: 80
+    Description: Docker application port for binding
+
+  ContainerCpu:
+    Type: Number
+    Default: 256
+    Description: How much CPU to give the container. 1024 is 1 CPU 
+
+  ContainerMemory:
+    Type: Number
+    Default: 512
+    Description: How much memory in megabytes to give the container
+
+  DesiredCount:
+    Type: Number
+    Default: 2
+    Description: How many copies of the service task to run
+
+  Role:
+    Type: String
+    Default: ""
+    Description: (Optional) An IAM role to give the service's containers if the code within needs to
+                 access other AWS resources like S3 buckets, DynamoDB tables, etc
+
+Conditions:
+  HasCustomRole: !Not [ !Equals [!Ref 'Role', ''] ]
+
+Resources:
+  ECRRepository: 
+    Type: AWS::ECR::Repository
+    Properties: 
+      RepositoryName: !Sub ${AWS::StackName}-ecr
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+       - Key: Name
+         Value: !Ref 'AWS::StackName'
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+       - Key: Name
+         Value: !Sub ${AWS::StackName}-InternetGateway
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  PublicSubnetOne:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone:
+         Fn::Select:
+         - 0
+         - Fn::GetAZs: {Ref: 'AWS::Region'}
+      CidrBlock: !Ref PublicSubnetOneCIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+       - Key: Name
+         Value: !Sub ${AWS::StackName}-PublicSubnet1
+
+  PublicSubnetTwo:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone:
+         Fn::Select:
+         - 1
+         - Fn::GetAZs: {Ref: 'AWS::Region'}
+      CidrBlock: !Ref PublicSubnetTwoCIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+       - Key: Name
+         Value: !Sub ${AWS::StackName}-PublicSubnet2
+
+  PrivateSubnetOne:
+    Type: AWS::EC2::Subnet
+    Properties:
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref VPC
+      AvailabilityZone:
+         Fn::Select:
+         - 0
+         - Fn::GetAZs: {Ref: 'AWS::Region'}
+      CidrBlock: !Ref PrivateSubnetOneCIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+       - Key: Name
+         Value: !Sub ${AWS::StackName}-PrivateSubnet1
+
+  PrivateSubnetTwo:
+    Type: AWS::EC2::Subnet
+    Properties:
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref VPC
+      AvailabilityZone:
+         Fn::Select:
+         - 1
+         - Fn::GetAZs: {Ref: 'AWS::Region'}
+      CidrBlock: !Ref PrivateSubnetTwoCIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+       - Key: Name
+         Value: !Sub ${AWS::StackName}-PrivateSubnet2
+
+  NatGateway1EIP:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+
+  NatGateway2EIP:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+
+  NatGateway1:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGateway1EIP.AllocationId
+      SubnetId: !Ref PublicSubnetOne
+
+  NatGateway2:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGateway2EIP.AllocationId
+      SubnetId: !Ref PublicSubnetTwo
+
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+       - Key: Name
+         Value: !Sub ${AWS::StackName}-PublicRouteTbl
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetOneRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetOne
+
+  PublicSubnetTwoRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetTwo
+
+  PrivateRouteTableOne:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+       - Key: Name
+         Value: !Sub ${AWS::StackName}-PrivateRouteTbl1
+
+  PrivateSubnetOneRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableOne
+      SubnetId: !Ref PrivateSubnetOne
+
+  DefaultPrivateRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableOne
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway1
+
+  PrivateRouteTableTwo:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+       - Key: Name
+         Value: !Sub ${AWS::StackName}-PrivateRouteTbl2
+
+  PrivateSubnetTwoRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableTwo
+      SubnetId: !Ref PrivateSubnetTwo
+
+  DefaultPrivateRoute2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableTwo
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway2
+
+ # ECS Resources
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      Tags:
+       - Key: Name
+         Value: !Sub ${AWS::StackName}-ecs-cluster
+
+  # A public facing load balancer
+  PublicLoadBalancerSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Access to the public facing load balancer
+      VpcId: !Ref 'VPC'
+      SecurityGroupIngress:
+          # Allow access to ALB from anywhere on the internet
+          -
+            IpProtocol: tcp
+            FromPort: 80
+            ToPort: 80
+            CidrIp: 0.0.0.0/0
+          -
+            IpProtocol: tcp
+            FromPort: 8080
+            ToPort: 8080
+            CidrIp: 0.0.0.0/0
+  
+  PublicLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internet-facing
+      LoadBalancerAttributes:
+      - Key: idle_timeout.timeout_seconds
+        Value: '30'
+      Subnets:
+        # The load balancer is placed into the public subnets, so that traffic
+        # from the internet can reach the load balancer directly via the internet gateway
+        - !Ref PublicSubnetOne
+        - !Ref PublicSubnetTwo
+      SecurityGroups: [!Ref 'PublicLoadBalancerSG']
+      Tags:
+       - Key: Name
+         Value: !Sub ${AWS::StackName}-PublicALB
+
+  TargetGroup1:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn: 
+      - PublicLoadBalancer 
+    Properties:
+      TargetType: ip
+      HealthCheckIntervalSeconds: 6
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      Port: 80
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref 'VPC' 
+
+  TargetGroup2:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn: 
+      - PublicLoadBalancer 
+    Properties:
+      TargetType: ip
+      HealthCheckIntervalSeconds: 6
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      Port: 80
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref 'VPC' 
+
+  # Listener with default action to forward to drop.
+  PublicLoadBalancerListener1:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+      - PublicLoadBalancer
+      - TargetGroup1
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref TargetGroup1
+          Type: 'forward'
+      LoadBalancerArn: !Ref PublicLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  # Listener with default action to forward to drop.
+  PublicLoadBalancerListener2:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+      - PublicLoadBalancer
+      - TargetGroup2
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref TargetGroup2
+          Type: 'forward'
+      LoadBalancerArn: !Ref PublicLoadBalancer
+      Port: 8080
+      Protocol: HTTP
+
+  # This is a role which is used by the ECS tasks themselves.
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: [ecs-tasks.amazonaws.com]
+          Action: ['sts:AssumeRole']
+      Path: /
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+
+  EcsRoleForCodeDeploy:
+    Type: AWS::IAM::Role
+    Properties:
+      Policies:
+        - PolicyName: passRoleForCodeDeploy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt ECSTaskExecutionRole.Arn
+      AssumeRolePolicyDocument:
+        Version: 2008-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [ codedeploy.amazonaws.com ]
+            Action: sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AWSCodeDeployRoleForECS'
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub ${AWS::StackName}-loggroup-svc
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${AWS::StackName}-svc
+      Cpu: !Ref 'ContainerCpu'
+      Memory: !Ref 'ContainerMemory'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      TaskRoleArn:
+        Fn::If:
+          - 'HasCustomRole'
+          - !Ref 'Role'
+          - !Ref "AWS::NoValue"
+      ContainerDefinitions:
+        - Name: !Sub ${AWS::StackName}-svc
+          Cpu: !Ref 'ContainerCpu'
+          Memory: !Ref 'ContainerMemory'
+          Image: !Ref ImageUrl
+          PortMappings:
+            - ContainerPort: !Ref 'ContainerPort'
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: !Sub ${AWS::StackName}-svc
+
+Outputs:
+  PrivateSubnetOne:
+    Description: A reference to the private subnet in the 1st Availability Zone
+    Value: !Ref PrivateSubnetOne
+    Export:
+      Name: 
+        Fn::Join:
+          - ':'
+          - - !Ref AWS::StackName
+            - PrivateSubnetOne
+
+  PrivateSubnetTwo:
+    Description: A reference to the private subnet in the 2nd Availability Zone
+    Value: !Ref PrivateSubnetTwo
+    Export:
+      Name: 
+        Fn::Join:
+          - ':'
+          - - !Ref AWS::StackName
+            - PrivateSubnetTwo
+
+  TargetGroup1Name:
+    Description: The name of the target group 1
+    Value: !GetAtt  TargetGroup1.TargetGroupName
+    Export:
+      Name: 
+        Fn::Join:
+          - ':'
+          - - !Ref AWS::StackName
+            - TargetGroup1Name
+
+  TargetGroup1Arn:
+    Description: The ARN of the target group 1
+    Value: !Ref  TargetGroup1
+    Export:
+      Name: 
+        Fn::Join:
+          - ':'
+          - - !Ref AWS::StackName
+            - TargetGroup1Arn
+
+  TargetGroup2Name:
+    Description: The name of the target group 2
+    Value: !GetAtt  TargetGroup2.TargetGroupName
+    Export:
+      Name: 
+        Fn::Join:
+          - ':'
+          - - !Ref AWS::StackName
+            - TargetGroup2Name
+
+  TargetGroup2Arn:
+    Description: The ARN of the target group 2
+    Value: !Ref  TargetGroup2
+    Export:
+      Name: 
+        Fn::Join:
+          - ':'
+          - - !Ref AWS::StackName
+            - TargetGroup2Arn
+
+  PublicListener1:
+    Description: The ARN of the public load balancer's Listener
+    Value: !Ref PublicLoadBalancerListener1
+    Export:
+      Name: 
+        Fn::Join:
+          - ':'
+          - - !Ref AWS::StackName
+            - PublicLoadBalancerListener1
+
+  PublicListener2:
+    Description: The ARN of the public load balancer's Listener
+    Value: !Ref PublicLoadBalancerListener2
+    Export:
+      Name: 
+        Fn::Join:
+          - ':'
+          - - !Ref AWS::StackName
+            - PublicLoadBalancerListener2
+
+  PublicLoadBalancerSecurityGroup:
+    Description: The SG group name attached to the Public Loadbalancer
+    Value: !Ref PublicLoadBalancerSG
+    Export:
+      Name: 
+        Fn::Join:
+          - ':'
+          - - !Ref AWS::StackName
+            - PublicLoadBalancerSecurityGroup   
+
+  ExternalUrl:
+    Description: The url of the external load balancer
+    Value: 
+      Fn::Join:
+        - ''
+        - - 'http://'
+          - !GetAtt 'PublicLoadBalancer.DNSName'
+    Export:
+      Name: 
+        Fn::Join:
+          - ':'
+          - - !Ref AWS::StackName
+            - ExternalUrl   
+
+  ECSTaskExecutionRole:
+    Description: The ARN of the ECS role
+    Value: !GetAtt 'ECSTaskExecutionRole.Arn'
+    Export:
+      Name: 
+        Fn::Join: 
+          - ':'
+          - - !Ref AWS::StackName
+            - ECSTaskExecutionRole
+
+  EcsRoleForCodeDeploy:
+    Description: The ARN of the ECS role for CodeDeploy
+    Value: !GetAtt 'EcsRoleForCodeDeploy.Arn'
+    Export:
+      Name: 
+        Fn::Join: 
+          - ':'
+          - - !Ref AWS::StackName
+            - EcsRoleForCodeDeploy
+
+  TaskDefinitionArn:
+    Description: The ARN of the ECS task definition
+    Value: !Ref TaskDefinition
+    Export:
+      Name: 
+        Fn::Join: 
+          - ':'
+          - - !Ref AWS::StackName
+            - TaskDefinitionArn
+ 
+  Servicename:
+    Description: The name of the ECS service to be used
+    Value: !Sub ${AWS::StackName}-svc
+    Export:
+      Name: 
+        Fn::Join: 
+          - ':'
+          - - !Ref AWS::StackName
+            - ServiceName
+
+  ApplicationName:
+    Description: The name to use for the CodeDeploy application 
+    Value: !Sub ${AWS::StackName}-app
+    Export:
+      Name: 
+        Fn::Join: 
+          - ':'
+          - - !Ref AWS::StackName
+            - ApplicationName
+ 
+  DeploymentGroupName:
+    Description: The name to use for the CodeDeploy deployment group
+    Value: !Sub ${AWS::StackName}-app-dg
+    Export:
+      Name: 
+        Fn::Join: 
+          - ':'
+          - - !Ref AWS::StackName
+            - DeploymentGroupName
+
+  ClusterName:
+    Description: The name of the ECS cluster
+    Value: !Ref ECSCluster
+    Export:
+      Name: 
+        Fn::Join:
+          - ':'
+          - - !Ref AWS::StackName
+            - ClusterName
