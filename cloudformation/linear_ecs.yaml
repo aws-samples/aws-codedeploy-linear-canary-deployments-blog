@@ -127,7 +127,6 @@ Resources:
   PrivateSubnetOne:
     Type: AWS::EC2::Subnet
     Properties:
-      MapPublicIpOnLaunch: false
       VpcId: !Ref VPC
       AvailabilityZone:
          Fn::Select:
@@ -142,7 +141,6 @@ Resources:
   PrivateSubnetTwo:
     Type: AWS::EC2::Subnet
     Properties:
-      MapPublicIpOnLaunch: false
       VpcId: !Ref VPC
       AvailabilityZone:
          Fn::Select:
